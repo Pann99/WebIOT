@@ -22,6 +22,12 @@ let timeRange     = 'minute';
 let currentMode   = null;   // null = belum diketahui (tunggu Firebase)
 let pumpStatus    = 'OFF';
 
+
+let lastUpdateValue    = null;
+let lastUpdateReceived = null;
+let offlineCheckTimer  = null;
+const OFFLINE_TIMEOUT_MS = 300000; // 5 menit tidak update → anggap offline
+let isOnline = false; // default offline sampai ESP32 kirim data
 const THRESHOLD_KERING = 40;
 
 // ===============================
@@ -91,6 +97,9 @@ function startRealtimeListeners() {
       return;
     }
 
+    // Jika ESP32 offline, jangan update tampilan sensor dari data lama Firebase
+    if (!isOnline) return;
+
     // Baca nilai masing-masing sensor dari ESP
     const sensor1  = parseFloat(data.sensor1 ?? 0);
     const sensor2  = parseFloat(data.sensor2 ?? 0);
@@ -104,7 +113,7 @@ function startRealtimeListeners() {
 
     if (s1El) s1El.textContent = sensor1 === 0 ? 'N/A' : sensor1.toFixed(2) + '%';
     if (s2El) s2El.textContent = sensor2 === 0 ? 'N/A' : sensor2.toFixed(2) + '%';
-    if (s3El) s3El.textContent = sensor3.toFixed(2) + '%';
+    if (s3El) s3El.textContent = sensor3 === 0 ? 'N/A' : sensor3.toFixed(2) + '%';
     if (avgEl) avgEl.textContent = moisture.toFixed(2) + '%';
 
     updateMoistureAlert(moisture);
@@ -157,6 +166,53 @@ function startRealtimeListeners() {
   }, (error) => {
     console.error('Mode listener error:', error);
   });
+
+  // ------------------------------------------
+  // 4. LISTENER TIMESTAMP (/soil/lastUpdate)
+  // ------------------------------------------
+  onValue(ref(rtdb, '/soil/lastUpdate'), (snapshot) => {
+    const val = snapshot.val();
+    if (val === null) {
+      setSensorOffline();
+      return;
+    }
+    // Terima update baru → catat waktu browser
+    lastUpdateValue    = val;
+    lastUpdateReceived = Date.now();
+
+    // Reset timer offline
+    if (offlineCheckTimer) clearTimeout(offlineCheckTimer);
+    offlineCheckTimer = setTimeout(() => {
+      setSensorOffline();
+    }, OFFLINE_TIMEOUT_MS);
+
+    // Tandai sensor online
+    setSensorOnline();
+  });
+}
+
+// ===============================
+// SET SENSOR OFFLINE (tampilan)
+// ===============================
+function setSensorOffline() {
+  isOnline = false;
+
+  const s1El  = document.getElementById('sensor1Value');
+  const s2El  = document.getElementById('sensor2Value');
+  const s3El  = document.getElementById('sensor3Value');
+  const avgEl = document.getElementById('averageValue');
+
+  if (s1El)  s1El.textContent  = 'N/A';
+  if (s2El)  s2El.textContent  = 'N/A';
+  if (s3El)  s3El.textContent  = 'N/A';
+  if (avgEl) avgEl.textContent = 'N/A';
+}
+
+// ===============================
+// SET SENSOR ONLINE (tampilan)
+// ===============================
+function setSensorOnline() {
+  isOnline = true;
 }
 
 // ===============================
